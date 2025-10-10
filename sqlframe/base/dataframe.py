@@ -11,6 +11,7 @@ import sys
 import typing as t
 import uuid
 import zlib
+import re
 from copy import copy
 from dataclasses import dataclass
 from uuid import uuid4
@@ -361,12 +362,23 @@ class BaseDataFrame(t.Generic[SESSION, WRITER, NA, STAT, GROUP_DATA]):
 
     def _replace_cte_names_with_hashes(self, expression: exp.Select):
         replacement_mapping = {}
+
         for cte in expression.ctes:
             old_name_id = cte.args["alias"].this
             new_hashed_id = exp.to_identifier(
                 self._create_hash_from_expression(cte.this), quoted=old_name_id.args["quoted"]
             )
+
+            if new_hashed_id in replacement_mapping.values():
+                new_alias = int(re.match(r"`?t(\d+)`?$", new_hashed_id.this).group(1))
+                new_hashed_id.set(
+                    "this",
+                    self.session._normalize_string(f"t{new_alias + 1}"),
+                )
+
             replacement_mapping[old_name_id] = new_hashed_id
+
+            # Should not transform the expression if the CTE is referenced multiple times throughout??
             expression = expression.transform(replace_id_value, replacement_mapping).assert_is(
                 exp.Select
             )
